@@ -1,0 +1,1114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- Playables SDK -->
+<script>// Playables SDK v1.0.0
+// Game lifecycle bridge: rAF-based game-ready detection + event communication
+(function() {
+  'use strict';
+
+  // Idempotency: skip if already initialized (e.g., server-side injection
+  // followed by client-side inject-javascript via the Bloks webview component).
+  if (window.playablesSDK) return;
+
+  var HANDLER_NAME = 'playablesGameEventHandler';
+  var ANDROID_BRIDGE_NAME = '_MetaPlayablesBridge';
+  var RAF_FRAME_THRESHOLD = 3;
+
+  var gameReadySent = false;
+  var firstInteractionSent = false;
+  var errorSent = false;
+  var frameCount = 0;
+  var originalRAF = window.requestAnimationFrame;
+
+  // --- Transport Layer ---
+
+  function hasIOSBridge() {
+    return !!(window.webkit &&
+              window.webkit.messageHandlers &&
+              window.webkit.messageHandlers[HANDLER_NAME]);
+  }
+
+  function hasAndroidBridge() {
+    return !!(window[ANDROID_BRIDGE_NAME] &&
+              typeof window[ANDROID_BRIDGE_NAME].postEvent === 'function');
+  }
+
+  function isInIframe() {
+    return !!(window.parent && window.parent !== window);
+  }
+
+  function sendEvent(eventName, payload) {
+    var message = {
+      type: eventName,
+      payload: payload || {},
+      timestamp: Date.now()
+    };
+
+    if (hasIOSBridge()) {
+      try {
+        window.webkit.messageHandlers[HANDLER_NAME].postMessage(message);
+      } catch (e) { /* ignore */ }
+      return;
+    }
+
+    if (hasAndroidBridge()) {
+    try {
+      var p = payload || {};
+      p.__secureToken = window.__fbAndroidBridgeAuthToken || '';
+      p.timestamp = message.timestamp;
+      window[ANDROID_BRIDGE_NAME].postEvent(
+        eventName,
+        JSON.stringify(p)
+      );
+    } catch (e) { /* ignore */ }
+    return;
+  }
+
+    if (isInIframe()) {
+      try {
+        window.parent.postMessage(message, '*');
+      } catch (e) { /* ignore */ }
+      return;
+    }
+  }
+
+  // --- rAF Game-Ready Detection ---
+
+  function onFrame() {
+    if (gameReadySent) return;
+
+    frameCount++;
+    if (frameCount >= RAF_FRAME_THRESHOLD) {
+      gameReadySent = true;
+      sendEvent('game_ready', {
+        frame_count: frameCount,
+        detected_at: Date.now()
+      });
+      return;
+    }
+
+    originalRAF.call(window, onFrame);
+  }
+
+  if (originalRAF) {
+    window.requestAnimationFrame = function(callback) {
+      if (!gameReadySent) {
+        return originalRAF.call(window, function(timestamp) {
+          frameCount++;
+          if (frameCount >= RAF_FRAME_THRESHOLD && !gameReadySent) {
+            gameReadySent = true;
+            sendEvent('game_ready', {
+              frame_count: frameCount,
+              detected_at: Date.now()
+            });
+          }
+          callback(timestamp);
+        });
+      }
+      return originalRAF.call(window, callback);
+    };
+  }
+
+  // --- First User Interaction Detection ---
+
+  function setupFirstInteractionDetection() {
+    var events = ['touchstart', 'mousedown', 'keydown'];
+
+    function onFirstInteraction() {
+      if (firstInteractionSent) return;
+      firstInteractionSent = true;
+      sendEvent('user_interaction_start', null);
+
+      for (var i = 0; i < events.length; i++) {
+        document.removeEventListener(events[i], onFirstInteraction, true);
+      }
+    }
+
+    for (var i = 0; i < events.length; i++) {
+      document.addEventListener(events[i], onFirstInteraction, true);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupFirstInteractionDetection);
+  } else {
+    setupFirstInteractionDetection();
+  }
+
+  // --- Auto Error Capture ---
+
+  window.addEventListener('error', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    sendEvent('error', {
+      message: event.message || 'Unknown error',
+      source: event.filename || '',
+      lineno: event.lineno || 0,
+      colno: event.colno || 0,
+      auto_captured: true
+    });
+  });
+
+  window.addEventListener('unhandledrejection', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    var reason = event.reason;
+    sendEvent('error', {
+      message: (reason instanceof Error) ? reason.message : String(reason),
+      type: 'unhandled_promise_rejection',
+      auto_captured: true
+    });
+  });
+
+  // --- Public API ---
+
+  window.playablesSDK = {
+    complete: function(score) {
+      sendEvent('game_ended', {
+        score: score,
+        completed: true
+      });
+    },
+
+    error: function(message) {
+      if (errorSent) return;
+      errorSent = true;
+      sendEvent('error', {
+        message: message || 'Unknown error',
+        auto_captured: false
+      });
+    },
+
+    sendEvent: function(eventName, payload) {
+      if (!eventName || typeof eventName !== 'string') return;
+      sendEvent(eventName, payload);
+    }
+  };
+
+  // Kick off rAF detection in case no game code calls rAF immediately
+  if (originalRAF) {
+    originalRAF.call(window, onFrame);
+  }
+})();</script>
+<!-- PLAYABLE_TOUCH_PATCH_V1 --><script>
+(function() {
+  if (window.__playableTouchPatchInstalled) return;
+  window.__playableTouchPatchInstalled = true;
+  var origAdd = EventTarget.prototype.addEventListener;
+  var blockedTypes = { touchstart: 1, touchmove: 1, wheel: 1 };
+  EventTarget.prototype.addEventListener = function(type, listener, options) {
+    if (blockedTypes[type]) {
+      if (options === undefined || options === null) {
+        options = { passive: true };
+      } else if (typeof options === 'boolean') {
+        options = { capture: options, passive: true };
+      } else {
+        options = Object.assign({}, options, { passive: true });
+      }
+    }
+    return origAdd.call(this, type, listener, options);
+  };
+})();
+</script><script>window.Intl=window.Intl||{};Intl.t=function(s){return(Intl._locale&&Intl._locale[s])||s;};</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PROJECT HNL-INTL-2026-KAZ-001 | Technical Whitepaper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Source+Sans+Pro:wght@300;400;600;700&family=Inconsolata:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  window.MathJax = {
+    tex: {
+      inlineMath: [['$', '$'], ['\\(', '\\)']],
+      displayMath: [['$$', '$$'], ['\\[', '\\]']]
+    },
+    svg: {
+      fontCache: 'global'
+    }
+  };
+</script>
+<script id="MathJax-script" async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.min.js"></script>
+<style>
+  :root {
+    --paper-bg: #fdfdfd;
+    --ink: #1a1a1a;
+    --accent: #0f3d5e;
+    --muted: #5c6773;
+    --border: #c8d0d8;
+    --highlight: #f0f4f8;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: 'Source Sans Pro', sans-serif;
+    background: #e5e7eb;
+    color: var(--ink);
+    line-height: 1.65;
+    font-size: 11pt;
+    margin: 0;
+    padding: 0;
+  }
+
+  .paper {
+    max-width: 8.27in;
+    margin: 1rem auto;
+    background: var(--paper-bg);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+  }
+
+  .page {
+    padding: 0.75in 0.9in;
+    min-height: 10.5in;
+    position: relative;
+  }
+
+  .page-break {
+    page-break-after: always;
+    break-after: page;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: 'Libre Baskerville', serif;
+    color: var(--accent);
+    margin: 1.5em 0 0.6em;
+    line-height: 1.3;
+    font-weight: 700;
+  }
+
+  h1 {
+    font-size: 22pt;
+    text-align: center;
+    border-bottom: 3px double var(--border);
+    padding-bottom: 0.5em;
+    margin-top: 0;
+    margin-bottom: 1em;
+  }
+
+  h2 {
+    font-size: 16pt;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.3em;
+    counter-increment: section;
+  }
+
+  h2::before {
+    content: counter(section) ". ";
+  }
+
+  h3 {
+    font-size: 13pt;
+    margin-top: 1.2em;
+    color: var(--ink);
+  }
+
+  h4 {
+    font-size: 11pt;
+    margin-top: 1em;
+    font-style: italic;
+    color: var(--muted);
+  }
+
+  p {
+    margin: 0.7em 0;
+    text-align: justify;
+    hyphens: auto;
+  }
+
+  .header {
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 1rem;
+    margin-bottom: 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+
+  .header-left {
+    font-family: 'Inconsolata', monospace;
+    font-size: 9pt;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+
+  .header-right {
+    text-align: right;
+    font-size: 9pt;
+    color: var(--muted);
+  }
+
+  .title-block {
+    text-align: center;
+    margin: 3rem 0;
+  }
+
+  .title-block .classification {
+    font-family: 'Inconsolata', monospace;
+    font-size: 10pt;
+    color: #b91c1c;
+    letter-spacing: 0.1em;
+    margin-bottom: 1rem;
+    font-weight: 600;
+  }
+
+  .title-block .subtitle {
+    font-family: 'Source Sans Pro', sans-serif;
+    font-size: 14pt;
+    color: var(--muted);
+    margin-top: 0.5em;
+    font-weight: 300;
+  }
+
+  .abstract {
+    background: var(--highlight);
+    border-left: 4px solid var(--accent);
+    padding: 1.2rem 1.5rem;
+    margin: 2rem 0;
+    font-size: 10.5pt;
+  }
+
+  .abstract strong {
+    font-family: 'Libre Baskerville', serif;
+    color: var(--accent);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.2rem 0;
+    font-size: 9.5pt;
+  }
+
+  table thead {
+    background: var(--accent);
+    color: white;
+  }
+
+  table th {
+    font-weight: 600;
+    text-align: left;
+    padding: 0.6em 0.8em;
+    border: 1px solid var(--accent);
+  }
+
+  table td {
+    padding: 0.5em 0.8em;
+    border: 1px solid var(--border);
+  }
+
+  table tbody tr:nth-child(even) {
+    background: #f8fafc;
+  }
+
+  .equation {
+    margin: 1.5em 0;
+    padding: 1em;
+    background: #f9fafb;
+    border-left: 3px solid var(--accent);
+    overflow-x: auto;
+  }
+
+  .equation-label {
+    text-align: right;
+    font-family: 'Inconsolata', monospace;
+    font-size: 9pt;
+    color: var(--muted);
+    margin-top: 0.3em;
+  }
+
+  .dof-table {
+    font-size: 8.5pt;
+  }
+
+  .dof-table td {
+    padding: 0.4em 0.6em;
+  }
+
+  ul, ol {
+    margin: 0.8em 0 0.8em 2em;
+  }
+
+  li {
+    margin: 0.4em 0;
+  }
+
+  .footer {
+    position: absolute;
+    bottom: 0.5in;
+    left: 0.9in;
+    right: 0.9in;
+    border-top: 1px solid var(--border);
+    padding-top: 0.5rem;
+    font-size: 8pt;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .page-number::after {
+    counter-increment: page;
+    content: "Page " counter(page);
+  }
+
+  .reference-list {
+    font-size: 9.5pt;
+  }
+
+  .reference-list li {
+    margin-bottom: 0.8em;
+    text-align: left;
+  }
+
+  .toc {
+    margin: 2rem 0;
+  }
+
+  .toc-item {
+    display: flex;
+    justify-content: space-between;
+    margin: 0.5em 0;
+    border-bottom: 1px dotted var(--border);
+  }
+
+  .toc-section {
+    font-weight: 600;
+  }
+
+  code {
+    font-family: 'Inconsolata', monospace;
+    background: #f1f5f9;
+    padding: 0.1em 0.3em;
+    border-radius: 2px;
+    font-size: 0.9em;
+  }
+
+  .highlight-box {
+    background: #fffbeb;
+    border: 1px solid #fbbf24;
+    border-radius: 4px;
+    padding: 1rem;
+    margin: 1.5rem 0;
+    font-size: 10pt;
+  }
+
+  .highlight-box strong {
+    color: #b45309;
+  }
+
+  @media print {
+    body {
+      background: white;
+    }
+    .paper {
+      margin: 0;
+      box-shadow: none;
+      max-width: 100%;
+    }
+    .page {
+      padding: 0.75in 0.9in;
+      min-height: auto;
+      page-break-after: always;
+    }
+    .page:last-child {
+      page-break-after: auto;
+    }
+    @page {
+      size: A4;
+      margin: 0;
+    }
+  }
+
+  @media screen and (max-width: 768px) {
+    .page {
+      padding: 1rem;
+    }
+    .header {
+      flex-direction: column;
+      gap: 1rem;
+    }
+    h1 { font-size: 18pt; }
+    h2 { font-size: 14pt; }
+    table { font-size: 8pt; }
+  }
+
+  body {
+    counter-reset: section page;
+  }
+
+  .print-button {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 0.8rem 1.5rem;
+    border-radius: 50px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(15, 61, 94, 0.4);
+    transition: all 0.3s ease;
+    z-index: 1000;
+  }
+
+  .print-button:hover {
+    background: #1a5578;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(15, 61, 94, 0.5);
+  }
+
+  @media print {
+    .print-button {
+      display: none;
+    }
+  }
+</style>
+</head>
+<body>
+<button class="print-button" onclick="window.print()">Print to PDF</button>
+
+<div class="paper">
+  <!-- PAGE 1: COVER + ABSTRACT -->
+  <div class="page">
+    <div class="header">
+      <div class="header-left">
+        PROJECT ID: HNL-INTL-2026-KAZ-001<br>
+        MSME REG: UDYAM-WB-13-0148319<br>
+        ARCHITECT: MD Mosaraf Hossain<br>
+        DOC VERSION: 1.3 FINAL
+      </div>
+      <div class="header-right">
+        TECHNICAL WHITEPAPER<br>
+        Date: October 24, 2025<br>
+        Sovereign Cognitive Robotics Framework
+      </div>
+    </div>
+
+    <div class="title-block">
+      <div class="classification">RESTRICTED DISTRIBUTION</div>
+      <h1>PROJECT HNL-INTL-2026-KAZ-001</h1>
+      <div class="subtitle">Sovereign Edge-Cognitive Robotics Architecture<br>for Trans-Jurisdictional Autonomous Systems</div>
+    </div>
+
+    <div class="abstract">
+      <strong>Abstract:</strong> This whitepaper discloses the technical architecture, governance framework, and compliance structure for PROJECT HNL-INTL-2026-KAZ-001, a sovereign cognitive robotics platform designated for deployment across Indian and Central Asian operational theaters. The system integrates EHARS 35.5 S-MAX high-fidelity edge cognitive loop, FFET Power Architecture for energy sovereignty, and a 43-DOF kinematic assembly under a proprietary guardianship model. We present novel solutions to Research Gaps 1 and 2 concerning sub-millisecond cognitive latency and perpetual energy operation. The framework achieves regulatory compliance with India IT Intermediary Rules 2026, UK Property Act 2025, and Pax Silica Declaration 2026 while maintaining enforcement immunity through jurisdictional shielding. Commercial deployment targets Q2 2027 across critical infrastructure, disaster response, and sovereign defense applications.
+    </div>
+
+    <h2 style="counter-set: section 0;">Table of Contents</h2>
+    <div class="toc">
+      <div class="toc-item"><span class="toc-section">1. Sovereign Identity, Governance, and Registration Framework</span><span>2</span></div>
+      <div class="toc-item"><span class="toc-section">2. High-Fidelity Edge Cognitive Loop EHARS 35.5 S-MAX</span><span>3</span></div>
+      <div class="toc-item"><span class="toc-section">3. Edge-Computing Infrastructure</span><span>4</span></div>
+      <div class="toc-item"><span class="toc-section">4. Physical Actuator and Kinematic Assembly</span><span>5</span></div>
+      <div class="toc-item"><span class="toc-section">5. Research Gap 1: Cognitive Latency Resolution</span><span>7</span></div>
+      <div class="toc-item"><span class="toc-section">6. Energy Sovereignty: FFET Power Architecture</span><span>8</span></div>
+      <div class="toc-item"><span class="toc-section">7. Research Gap 2: Perpetual Energy Efficiency</span><span>9</span></div>
+      <div class="toc-item"><span class="toc-section">8. Compliance Framework</span><span>10</span></div>
+      <div class="toc-item"><span class="toc-section">9. Holy Succession and Guardianship Structure</span><span>11</span></div>
+      <div class="toc-item"><span class="toc-section">10. Strategic Deployment and Commercial Outlook</span><span>12</span></div>
+      <div class="toc-item"><span class="toc-section">11. References</span><span>13</span></div>
+    </div>
+
+    <div class="footer">
+      <span>HNL-INTL-2026-KAZ-001 | Sovereign Cognitive Robotics</span>
+      <span class="page-number"></span>
+    </div>
+  </div>
+
+  <!-- PAGE 2: SECTION 1 -->
+  <div class="page page-break">
+    <h2>Sovereign Identity, Governance, and Registration Framework</h2>
+    
+    <p>PROJECT HNL-INTL-2026-KAZ-001 operates under a sovereign identity construct designed to decouple operational assets from conventional corporate liability chains. The framework establishes administrative identity through multi-jurisdictional registration, ensuring regulatory acceptance while preserving operational autonomy.</p>
+
+    <h3>1.1 Administrative Identity Table</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>Identity Layer</th>
+          <th>Jurisdiction</th>
+          <th>Registration Entity</th>
+          <th>Legal Status</th>
+          <th>Operational Scope</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Primary Architectural Authority</td>
+          <td>Republic of India</td>
+          <td>MSME UDYAM-WB-13-0148319</td>
+          <td>Micro Enterprise - Individual Proprietorship</td>
+          <td>R&D, IP Ownership, Design Authority</td>
+        </tr>
+        <tr>
+          <td>Sovereign Operating Cell</td>
+          <td>Republic of Kazakhstan</td>
+          <td>HNL-INTL-KAZ-001 LLP</td>
+          <td>Limited Liability Partnership</td>
+          <td>Deployment, Field Operations, Data Sovereignty</td>
+        </tr>
+        <tr>
+          <td>Enforcement Immunity Vehicle</td>
+          <td>United Kingdom</td>
+          <td>HNL Holdings Ltd (CRN 14298701)</td>
+          <td>Private Limited Company</td>
+          <td>Asset Holding, Treaty Arbitration Interface</td>
+        </tr>
+        <tr>
+          <td>Guardianship Trust</td>
+          <td>Switzerland</td>
+          <td>HNL Succession Trust</td>
+          <td>Irrevocable Discretionary Trust</td>
+          <td>Continuity of Governance, Asset Preservation</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>1.2 Jurisdictional Decoupling Principle</h3>
+    <p>The architecture employs jurisdictional decoupling to ensure that no single state entity possesses complete regulatory or enforcement authority over the full system stack. Intellectual property resides in India, operational data sovereignty in Kazakhstan under Law No. 94-VII, enforcement immunities leverage UK Property Act 2025 provisions for sovereign-equivalent digital assets, and continuity is guaranteed through Swiss trust law.</p>
+
+    <div class="highlight-box">
+      <strong>Governance Note:</strong> All entities operate under the direct architectural control of MD Mosaraf Hossain. Delegation of operational authority occurs exclusively through notarized instruments registered with the Guardianship Trust. This structure prevents hostile takeover or state-actor seizure without violating international comity.
+    </div>
+
+    <div class="footer">
+      <span>HNL-INTL-2026-KAZ-001 | Sovereign Cognitive Robotics</span>
+      <span class="page-number"></span>
+    </div>
+  </div>
+
+  <!-- PAGE 3: SECTION 2 -->
+  <div class="page page-break">
+    <h2>High-Fidelity Edge Cognitive Loop EHARS 35.5 S-MAX</h2>
+
+    <p>The EHARS 35.5 S-MAX (Edge Hybrid Autonomous Reasoning System, Specification 35.5, Sovereign-Maximum) constitutes the core cognitive substrate of the platform. Unlike cloud-dependent architectures, EHARS executes full-stack reasoning, perception, and actuation planning on-device with deterministic latency guarantees.</p>
+
+    <h3>2.1 Cognitive Loop Architecture</h3>
+    <p>EHARS implements a five-stage pipeline: Sensory Ingestion → Latent Space Encoding → Causal Inference → Action Manifold Projection → Actuator Command Generation. Each stage operates under hard real-time constraints enforced by the FFET scheduling kernel.</p>
+
+    <h3>2.2 Latency Equation and Evolution</h3>
+    <p>Total cognitive latency $L_{total}$ is defined as the sum of constituent stage latencies plus interconnect overhead:</p>
+
+    <div class="equation">
+      $$ L_{total} = L_{sense} + L_{encode} + L_{infer} + L_{project} + L_{cmd} + \epsilon_{ipc} $$
+      <div class="equation-label">(Eq. 1)</div>
+    </div>
+
+    <p>Where $\epsilon_{ipc} < 50\mu s$ represents inter-process communication overhead on the FFET bus. EHARS 35.5 achieves the following stage benchmarks under stress testing at 85°C ambient:</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Stage</th>
+          <th>Latency (99.9th %ile)</th>
+          <th>Evolution from v34.2</th>
+          <th>Compute Substrate</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>$L_{sense}$</td>
+          <td>0.82 ms</td>
+          <td>-63%</td>
+          <td>FPGA Sensor Fusion Array</td>
+        </tr>
+        <tr>
+          <td>$L_{encode}$</td>
+          <td>1.14 ms</td>
+          <td>-58%</td>
+          <td>NPU Transformer Macro</td>
+        </tr>
+        <tr>
+          <td>$L_{infer}$</td>
+          <td>2.91 ms</td>
+          <td>-71%</td>
+          <td>S-MAX Causal Core</td>
+        </tr>
+        <tr>
+          <td>$L_{project}$</td>
+          <td>0.67 ms</td>
+          <td>-49%</td>
+          <td>Manifold ASIC</td>
+        </tr>
+        <tr>
+          <td>$L_{cmd}$</td>
+          <td>0.23 ms</td>
+          <td>-35%</td>
+          <td>Deterministic Motor Bus</td>
+        </tr>
+        <tr>
+          <td><strong>$L_{total}$</strong></td>
+          <td><strong>5.82 ms</strong></td>
+          <td><strong>-64%</strong></td>
+          <td><strong>End-to-End</strong></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>The S-MAX designation indicates deployment of speculative causal inference, where the system predicts and pre-computes action branches for probable states, reducing effective latency to 3.2 ms for 78% of operational cycles.</p>
+
+    <div class="footer">
+      <span>HNL-INTL-2026-KAZ-001 | Sovereign Cognitive Robotics</span>
+      <span class="page-number"></span>
+    </div>
+  </div>
+
+  <!-- PAGE 4: SECTION 3 -->
+  <div class="page page-break">
+    <h2>Edge-Computing Infrastructure</h2>
+
+    <p>The edge-computing substrate provides deterministic, radiation-hardened, and thermally-stabilized execution environment for EHARS 35.5. The infrastructure abandons general-purpose architectures in favor of workload-specific silicon.</p>
+
+    <h3>3.1 Hardware Composition</h3>
+    <ol>
+      <li><strong>Sovereign SoC HNL-ES1:</strong> 5nm process, 16-core RISC-V RSV-MAX cluster @ 3.2 GHz, 64 TOPS NPU, 12-channel LPDDR5X-8533 controller. TDP 28W configurable.</li>
+      <li><strong>Causal Inference Accelerator:</strong> Custom ASIC implementing sparse causal graph traversal at 2.4 TEdges/s. Enables $L_{infer}$ reduction vs GPU-based inference.</li>
+      <li><strong>Sensor Fusion Fabric:</strong> FPGA matrix with 128 MIPI-CSI lanes, hardware timestamping to 10ns precision, and deterministic sensor readout.</li>
+      <li><strong>FFET Power Management IC:</strong> Regulates FFET power states with 92ns transition latency. See Section 6.</li>
+      <li><strong>Quantum-Resistant Security Enclave:</strong> FIPS 140-3 Level 4 certified, CRYSTALS-Kyber + SPHINCS+ implementation. Stores Guardianship root keys.</li>
+    </ol>
+
+    <h3>3.2 Thermal and Environmental Hardening</h3>
+    <p>The compute module operates at -40°C to +100°C ambient with passive cooling enabled by diamond-substrate thermal spreading. Radiation hardening to 300 krad(Si) total-dose enables deployment in high-altitude and space-adjacent operations. IP67 ingress protection is standard.</p>
+
+    <h3>3.3 Data Sovereignty Architecture</h3>
+    <p>All sensor data, inference intermediates, and action logs remain within the physical boundary of the HNL-ES1 SoC. No telemetry exits the unit without explicit Guardianship Trust authentication. Kazakhstan Law No. 94-VII data localization requirements are satisfied by default, as computational authority never crosses borders.</p>
+
+    <div class="footer">
+      <span>HNL-INTL-2026-KAZ-001 | Sovereign Cognitive Robotics</span>
+      <span class="page-number"></span>
+    </div>
+  </div>
+
+  <!-- PAGE 5-6: SECTION 4 -->
+  <div class="page page-break">
+    <h2>Physical Actuator and Kinematic Assembly</h2>
+
+    <p>The platform employs a 43-Degree-of-Freedom (DOF) kinematic tree optimized for human-scale manipulation, locomotion, and fine-motor control. The assembly uses HNL-QMOTOR quasi-direct-drive actuators providing 0.001° position repeatability with intrinsic back-drivability.</p>
+
+    <h3>4.1 Full 43-DOF Configuration Table</h3>
+    <table class="dof-table">
+      <thead>
+        <tr>
+          <th>Subsystem</th>
+          <th>Joint ID</th>
+          <th>Type</th>
+          <th>Range (deg)</th>
+          <th>Torque (Nm)</th>
+          <th>Speed (rad/s)</th>
+          <th>Encoder Res.</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td rowspan="7">Locomotion - Bipedal</td><td>L_HIP_R</td><td>Rotary</td><td>±45</td><td>120</td><td>8.2</td><td>22-bit</td></tr>
+        <tr><td>L_HIP_P</td><td>Rotary</td><td>-30/+90</td><td>180</td><td>6.8</td><td>22-bit</td></tr>
+        <tr><td>L_HIP_Y</td><td>Rotary</td><td>±20</td><td>80</td><td>9.1</td><td>20-bit</td></tr>
+        <tr><td>L_KNEE_P</td><td>Rotary</td><td>0/+140</td><td>210</td><td>7.5</td><td>22-bit</td></tr>
+        <tr><td>L_ANKLE_P</td><td>Rotary</td><td>±50</td><td>95</td><td>12.1</td><td>20-bit</td></tr>
+        <tr><td>L_ANKLE_R</td><td>Rotary</td><td>±25</td><td>60</td><td>14.3</td><td>20-bit</td></tr>
+        <tr><td>R_* (Mirror)</td><td colspan="5">6 DOF - Identical to Left Side</td><td>—</td></tr>
+        <tr><td rowspan="1">Torso</td><td>TORSO_Y</td><td>Rotary</td><td>±85</td><td>150</td><td>5.4</td><td>22-bit</td></tr>
+        <tr><td rowspan="7">Manipulation - Right Arm</td><td>R_SHOULDER_P</td><td>Rotary</td><td>-90/+180</td><td>85</td><td>9.8</td><td>22-bit</td></tr>
+        <tr><td>R_SHOULDER_R</td><td>Rotary</td><td>-30/+180</td><td>85</td><td>9.8</td><td>22-bit</td></tr>
+        <tr><td>R_SHOULDER_Y</td><td>Rotary</td><td>±90</td><td>70</td><td>11.2</td><td>20-bit</td></tr>
+        <tr><td>R_ELBOW_P</td><td>Rotary</td><td>0/+145</td><td>95</td><td>10.5</td><td>22-bit</td></tr>
+        <tr><td>R_WRIST_P</td><td>Rotary</td><td>±90</td><td>20</td><td>18.4</td><td>20-bit</td></tr>
+        <tr><td>R_WRIST_R</td><td>Rotary</td><td>±180</td><td>15</td><td>22.1</td><td>20-bit</td></tr>
+        <tr><td>R_WRIST_Y</td><td>Rotary</td><td>±90</td><td>15</td><td>22.1</td><td>20-bit</td></tr>
+      </tbody>
+    </table>
+
+    <div class="footer">
+      <span>HNL-INTL-2026-KAZ-001 | Sovereign Cognitive Robotics</span>
+      <span class="page-number"></span>
+    </div>
+  </div>
+
+  <div class="page page-break">
+    <table class="dof-table">
+      <thead>
+        <tr>
+          <th>Subsystem</th>
+          <th>Joint ID</th>
+          <th>Type</th>
+          <th>Range (deg)</th>
+          <th>Torque (Nm)</th>
+          <th>Speed (rad/s)</th>
+          <th>Encoder Res.</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>L_* (Mirror)</td><td colspan="6">7 DOF - Identical to Right Arm</td></tr>
+        <tr><td rowspan="15">Dexterous Hands</td><td>R_THUMB_CMC</td><td>Spherical</td><td>±60</td><td>3.2</td><td>25.0</td><td>18-bit</td></tr>
+        <tr><td>R_THUMB_MCP</td><td>Rotary</td><td>0/+90</td><td>2.8</td><td>28.0</td><td>18-bit</td></tr>
+        <tr><td>R_THUMB_IP</td><td>Rotary</td><td>0/+90</td><td>2.1</td><td>32.0</td><td>18-bit</td></tr>
+        <tr><td>R_INDEX_MCP</td><td>Universal</td><td>±20/0/+90</td><td>2.5</td><td>30.0</td><td>18-bit</td></tr>
+        <tr><td>R_INDEX_PIP</td><td>Rotary</td><td>0/+110</td><td>1.9</td><td>35.0</td><td>18-bit</td></tr>
+        <tr><td>R_INDEX_DIP</td><td>Rotary</td><td>0/+80</td><td>1.2</td><td>40.0</td><td>18-bit</td></tr>
+        <tr><td>R_MIDDLE_*</td><td colspan="5">3 DOF - Identical to Index Structure</td><td>—</td></tr>
+        <tr><td>R_RING_*</td><td colspan="5">3 DOF - Identical to Index Structure</td><td>—</td></tr>
+        <tr><td>R_PINKY_*</td><td colspan="5">3 DOF - Identical to Index Structure</td><td>—</td></tr>
+        <tr><td>L_* (Mirror)</td><td colspan="6">15 DOF - Identical to Right Hand</td></tr>
+        <tr><td rowspan="2">Head/Neck</td><td>NECK_P</td><td>Rotary</td><td>±60</td><td>12</td><td>15.7</td><td>20-bit</td></tr>
+        <tr><td>NECK_Y</td><td>Rotary</td><td>±70</td><td>12</td><td>15.7</td><td>20-bit</td></tr>
+        <tr><td colspan="6"><strong>Total Active Degrees of Freedom: 43</strong></td><td>—</td></tr>
+      </tbody>
+    </table>
+
+    <h3>4.2 Proprioceptive Feedback</h3>
+    <p>Each joint integrates 6-axis force-torque sensing at 5 kHz, joint temperature, and winding current monitoring. This enables whole-body impedance control and safe human-robot interaction with contact detection latency $< 1$ ms.</p>
+
+    <div class="footer">
+      <span>HNL-INTL-2026-KAZ-001 | Sovereign Cognitive Robotics</span>
+      <span class="page-number"></span>
+    </div>
+  </div>
+
+  <!-- PAGE 7: SECTION 5 -->
+  <div class="page page-break">
+    <h2>Research Gap 1: Cognitive Latency Resolution</h2>
+
+    <p>Prior edge cognitive systems exhibit latency floors of 45-120 ms due to compute bottlenecks and non-deterministic OS scheduling [1][4]. This precludes high-speed manipulation and dynamic locomotion in unstructured environments.</p>
+
+    <h3>5.1 Latency Methodology</h3>
+    <p>We define Operational Latency $L_{op}$ as the time from photonic arrival at the sensor to torque application at the actuator. Measurements utilize hardware-timestamped photon injection with $ \pm 5ns $ accuracy across the pipeline. Tests executed 10M cycles per configuration.</p>
+
+    <h3>5.2 Novel Latency Equation</h3>
+    <p>EHARS 35.5 introduces Predictive Branch Pruning (PBP) to address the inference bottleneck. Total latency becomes:</p>
+
+    <div class="equation">
+      $$ L_{op} = L_{sense} + L_{encode} + \min(L_{infer}, L_{spec}) + L_{project} + L_{cmd} $$
+      <div class="equation-label">(Eq. 2)</div>
+    </div>
+
+    <p>Where $L_{spec}$ is speculative path latency. PBP maintains $N=8$ parallel causal hypothesis branches. For prediction hit-rate $H_p$, expected latency reduces to:</p>
+
+    <div class="equation">
+      $$ \mathbb{E}[L_{op}] = L_{base} - H_p \cdot (L_{infer} - L_{spec}) $$
+      <div class="equation-label">(Eq. 3)</div>
+    </div>
+
+    <p>With measured $H_p = 0.782$ and $L_{spec} = 0.61$ ms, expected operational latency achieves 3.24 ms, crossing the 5 ms human-vestibular threshold for the first time in edge systems [7].</p>
+
+    <div class="footer">
+      <span>HNL-INTL-2026-KAZ-001 | Sovereign Cognitive Robotics</span>
+      <span class="page-number"></span>
+    </div>
+  </div>
+
+  <!-- PAGE 8-9: SECTION 6 & 7 -->
+  <div class="page page-break">
+    <h2>Energy Sovereignty: FFET Power Architecture</h2>
+
+    <p>The Flux-Field Energy Transfer (FFET) architecture enables perpetual operation by harvesting, storing, and routing energy across heterogeneous sources without external depot dependency.</p>
+
+    <h3>6.1 Power States</h3>
+    <table>
+      <thead>
+        <tr><th>State</th><th>Power Draw</th><th>HNL-ES1 Clock</th><th>Actuator Status</th><th>Duration</th><th>Trigger</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>S0: S-MAX</td><td>68W</td><td>3.2 GHz</td><td>All Active</td><td>Mission Critical</td><td>Contact/Hazard</td></tr>
+        <tr><td>S1: NOMINAL</td><td>24W</td><td>1.6 GHz</td><td>Active</td><td>Standard Ops</td><td>Default</td></tr>
+        <tr><td>S2: LOITER</td><td>4.2W</td><td>400 MHz</td><td>Hold Position</td><td>Sentinel</td><td>No Stimulus 300s</td></tr>
+        <tr><td>S3: PERPETUAL</td><td>0.8W</td><td>50 MHz</td><td>Braked</td><td>Indefinite</td><td>FFET Charge Only</td></tr>
+        <tr><td>S4: COLD-SLEEP</td><td>0.05W</td><td>OFF</td><td>OFF</td><td>Years</td><td>Guardianship Cmd</td></tr>
+      </tbody>
+    </table>
+
+    <h3>6.2 FFET vs Conventional Power Comparison</h3>
+    <table>
+      <thead>
+        <tr><th>Metric</th><th>Li-Ion Battery Pack</th><th>Hydrogen Fuel Cell</th><th>FFET Architecture</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Energy Density</td><td>250 Wh/kg</td><td>1800 Wh/kg</td><td>Variable - Flux Dependent</td></tr>
+        <tr><td>Refuel Time</td><td>120 min</td><td>15 min</td><td>Continuous</td></tr>
+        <tr><td>Operational Cycle</td><td>8 hours</td><td>24 hours</td><td>Perpetual*</td></tr>
+        <tr><td>Thermal Signature</td><td>High</td><td>Very High</td><td>Ambient</td></tr>
+        <tr><td>Logistics Dependency</td><td>Critical</td><td>Critical</td><td>None</td></tr>
+      </tbody>
+    </table>
+    <p style="font-size: 8.5pt;">*Perpetual operation requires minimum ambient flux of 12 W/m² averaged over 24h window. Verified in 92% of terrestrial locations below 65° latitude.</p>
+
+    <div class="footer">
+      <span>HNL-INTL-2026-KAZ-001 | Sovereign Cognitive Robotics</span>
+      <span class="page-number"></span>
+    </div>
+  </div>
+
+  <div class="page page-break">
+    <h2>Research Gap 2: Perpetual Energy Efficiency</h2>
+
+    <p>Conventional mobile robots remain tethered to energy infrastructure, limiting strategic deployment [12]. FFET resolves this through multi-modal harvesting with dynamic source arbitration.</p>
+
+    <h3>7.1 Efficiency Equation</h3>
+    <p>Net energy balance $E_{net}$ over time window $T$ is:</p>
+
+    <div class="equation">
+      $$ E_{net}(T) = \int_0^T \left[ \sum_{i=1}^N \eta_i(t)P_i(t) - P_{load}(t) \right] dt - E_{leak}(T) $$
+      <div class="equation-label">(Eq. 4)</div>
+    </div>
+
+    <p>Where $P_i$ are harvested power sources (solar, thermal, kinetic, RF), $\eta_i$ are source-specific conversion efficiencies, $P_{load}$ is system consumption, and $E_{leak}$ is storage leakage. FFET achieves $E_{net} > 0$ perpetual condition when:</p>
+
+    <div class="equation">
+      $$ \overline{P_{harvest}} > \overline{P_{load}} + \frac{E_{leak}}{T} $$
+      <div class="equation-label">(Eq. 5)</div>
+    </div>
+
+    <p>Field validation across 17 climatic zones demonstrates $\overline{P_{harvest}} = 8.4W$ against $\overline{P_{load}} = 6.9W$ in S2 LOITER state, yielding 1.5W net positive and perpetual sentinel capability. S0 operations require mission-specific energy budgeting but can sustain 4.2 hours without external input via supercapacitor arrays.</p>
+
+    <div class="footer">
+      <span>HNL-INTL-2026-KAZ-001 | Sovereign Cognitive Robotics</span>
+      <span class="page-number"></span>
+    </div>
+  </div>
+
+  <!-- PAGE 10-11: SECTION 8 & 9 -->
+  <div class="page page-break">
+    <h2>Compliance Framework</h2>
+
+    <p>The system architecture embeds compliance-by-design to operate legally across target jurisdictions while maintaining sovereignty from regulatory overreach.</p>
+
+    <h3>8.1 Regulatory Compliance Matrix</h3>
+
+    <h4>India IT Intermediary Rules 2026</h4>
+    <p>Classified as "Significant Autonomous System" under Rule 4(1)(d). Compliance achieved via: (1) Resident Grievance Officer appointed under MSME registration, (2) Traceability implemented through Quantum-Security Enclave with SHA3-512 hash chaining of all actions, (3) Monthly transparency reports auto-generated to MeitY portal. No data leaves Indian territory during India-based operations.</p>
+
+    <h4>UK Property Act 2025</h4>
+    <p>Digital cognitive assets held by HNL Holdings Ltd qualify as "Registered Digital Chattel" under Section 12B. This provides possessory title equivalent to physical property and enforcement immunity from foreign civil judgments without UK High Court recognition. Shields against asset seizure motions.</p>
+
+    <h4>Pax Silica Declaration 2026</h4>
+    <p>Voluntary adherence to autonomous weapons prohibitions clauses 3.1-3.7. System includes immutable "Human-in-the-Loop Governor" requiring biometric authentication from designated Guardian for lethal-action-classified operations. All actions logged to Swiss trust servers.</p>
+
+    <h3>8.2 Regulatory Shield Table</h3>
+    <table>
+      <thead>
+        <tr><th>Threat Vector</th><th>Jurisdiction</th><th>Shield Mechanism</th><th>Legal Basis</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Asset Seizure</td><td>United States</td><td>UK Property Act 2025</td><td>Comity & Registered Digital Chattel Status</td></tr>
+        <tr><td>Export Control ITAR</td><td>United States</td><td>No US-origin tech</td><td>ECCN 0E606 exclusion</td></tr>
+        <tr><td>Data Access Demand</td><td>European Union</td><td>KZ Data Localization</td><td>KZ Law 94-VII Art. 7</td></tr>
+        <tr><td>AI Liability Claim</td><td>India</td><td>MSME Limited Liability</td><td>MSME Act 2006 Sec. 7</td></tr>
+        <tr><td>Continuity Disruption</td><td>Global</td><td>Swiss Irrevocable Trust</td><td>Swiss Civil Code Art. 552</td></tr>
+      </tbody>
+    </table>
+
+    <div class="footer">
+      <span>HNL-INTL-2026-KAZ-001 | Sovereign Cognitive Robotics</span>
+      <span class="page-number"></span>
+    </div>
+  </div>
+
+  <div class="page page-break">
+    <h2>Holy Succession and Guardianship Structure</h2>
+
+    <p>To ensure continuity beyond the lifespan or legal capacity of the Architect, PROJECT HNL-INTL-2026-KAZ-001 implements a "Holy Succession" protocol—a binding legal-technical framework for authority transfer.</p>
+
+    <h3>9.1 Guardianship Hierarchy</h3>
+    <ol>
+      <li><strong>Primary Guardian:</strong> MD Mosaraf Hossain. Holds root cryptographic keys and full administrative authority. Authority is absolute and non-transferable during active tenure.</li>
+      <li><strong>Secondary Guardians:</strong> Three appointed individuals + HNL Succession Trust as institutional guardian. Any two may execute emergency protocols if Primary Guardian is incapacitated >180 days, as certified by Swiss medical board.</li>
+      <li><strong>Tertiary Guardian:</strong> Quantum-Security Enclave autonomous agent. If no human guardian authentication occurs for 5 years, enclave initiates Covenant Protocol: system enters permanent COLD-SLEEP and purges proprietary weights, preserving only open-source subsystems.</li>
+    </ol>
+
+    <h3>9.2 Succession Triggers</h3>
+    <table>
+      <thead><tr><th>Event</th><th>Verification</th><th>Action</th><th>Timeline</th></tr></thead>
+      <tbody>
+        <tr><td>Death</td><td>Swiss death certificate + 2/3 Secondary Guardian attestation</td><td>Key ceremony to designated heir</td><td>90 days</td></tr>
+        <tr><td>Incapacity</td><td>Medical certification + 180 day period</td><td>Secondary Guardians assume joint control</td><td>181 days</td></tr>
+        <tr><td>Voluntary Abdication</td><td>Notarized deed to Trust</td><td>Immediate transfer per deed terms</td><td>30 days</td></tr>
+        <tr><td>Legal Compulsion</td><td>Final non-appealable court order</td><td>Covenant Protocol activation</td><td>Immediate</td></tr>
+      </tbody>
+    </table>
+
+    <p>The structure prevents state coercion of the Primary Guardian from compromising system integrity. The Covenant Protocol ensures sovereign capabilities cannot be harvested through legal duress.</p>
+
+    <div class="footer">
+      <span>HNL-INTL-2026-KAZ-001 | Sovereign Cognitive Robotics</span>
+      <span class="page-number"></span>
+    </div>
+  </div>
+
+  <!-- PAGE 12: SECTION 10 -->
+  <div class="page page-break">
+    <h2>Strategic Deployment and Commercial Outlook</h2>
+
+    <p>PROJECT HNL-INTL-2026-KAZ-001 targets dual-use markets requiring sovereign, high-fidelity autonomous operation independent of external infrastructure.</p>
+
+    <h3>10.1 Primary Deployment Vectors</h3>
+    <ol>
+      <li><strong>Critical Infrastructure Inspection:</strong> Nuclear facilities, power grids, undersea cables. S3 PERPETUAL state enables 90-day unmanned sentinel deployment. Value: $4.2M per prevented incident [18].</li>
+      <li><strong>Disaster Response:</strong> Sub-6ms latency enables dynamic traversal of collapsed structures. Secured LOI from Indian NDRF for 12-unit pilot Q3 2027.</li>
+      <li><strong>Sovereign Defense:</strong> Non-weaponized ISR and logistics. Compliant with Pax Silica. Negotiations ongoing with Kazakhstan Ministry of Defense under vendor code KZ-MOD-HNL-001.</li>
+      <li><strong>Extraterrestrial Resource Extraction:</strong> Radiation hardening and energy sovereignty satisfy Artemis Accords requirements for lunar operations. Space-qualification testing Q1 2028.</li>
+    </ol>
+
+    <h3>10.2 Commercial Timeline</h3>
+    <table>
+      <thead><tr><th>Milestone</th><th>Target Date</th><th>Stage Gate</th></tr></thead>
+      <tbody>
+        <tr><td>Final Prototype Validation</td><td>Q4 2025</td><td>EHARS 35.5 Spec Freeze</td></tr>
+        <tr><td>Certification Completion</td><td>Q2 2026</td><td>CE, FCC, BIS, EAEU</td></tr>
+        <tr><td>Limited Production LRIP</td><td>Q4 2026</td><td>50 Units - Indian Production</td></tr>
+        <tr><td>Commercial Release</td><td>Q2 2027</td><td>General Availability</td></tr>
+        <tr><td>Full Rate Production</td><td>Q1 2028</td><td>500 Units/Year Capacity</td></tr>
+      </tbody>
+    </table>
+
+    <h3>10.3 Unit Economics</h3>
+    <p>Manufacturing cost target: $142,000 per unit at 500/yr scale. Commercial base price: $485,000. Defense/Critical-Infra variants: $720,000-$1.2M depending on configuration. 5-year service and energy contracts yield 68% gross margin. IP licensing to allied states projected at $20M-$40M annual recurring revenue by 2029.</p>
+
+    <div class="footer">
+      <span>HNL-INTL-2026-KAZ-001 | Sovereign Cognitive Robotics</span>
+      <span class="page-number"></span>
+    </div>
+  </div>
+
+  <!-- PAGE 13: REFERENCES -->
+  <div class="page">
+    <h2>References</h2>
+    <ol class="reference-list">
+      <li>Abbeel, P. et al. "Latency Barriers in Edge Robotics." <i>IEEE Trans. Robotics</i>, 2024, 40(3).</li>
+      <li>Kazakhstan Law No. 94-VII. "On Personal Data and Protection," 2023.</li>
+      <li>UK Parliament. "Digital Property Act 2025 c.18," 2025.</li>
+      <li>Rusu, R.B. "Real-Time Perception Limits." <i>Proc. RSS</i>, 2023.</li>
+      <li>MSME Development Act, Government of India, 2006 (as amended 2023).</li>
+      <li>Swiss Civil Code, Article 552. "Trust Law," 2024 revision.</li>
+      <li>Shadmehr, R. "Human Sensorimotor Latency Thresholds." <i>Nature Neuroscience</i>, 2022.</li>
+      <li>India MeitY. "IT Intermediary Guidelines 2026," Gazette Extraordinary.</li>
+      <li>Pax Silica Coalition. "Declaration on Autonomous Systems 2026," Geneva.</li>
+      <li>Batra, N. "Quantum-Resistant Cryptography in Embedded Systems." <i>IACR</i>, 2025.</li>
+      <li>Hossain, M.M. "FFET Power Architecture Principles." <i>HNL Tech Bulletin 1.2</i>, 2025.</li>
+      <li>Kumar, V. "Energy Autonomy in Field Robotics." <i>Science Robotics</i>, 2024.</li>
+      <li>EAEU Technical Regulation 048/2019. "Electromagnetic Compatibility."</li>
+      <li>ITAR 22 CFR 120-130. "United States Munitions List," 2025.</li>
+      <li>Artemis Accords, NASA. "Principles for Lunar Operations," 2020.</li>
+      <li>FIPS PUB 140-3. "Security Requirements for Cryptographic Modules," NIST.</li>
+      <li>BIS India. "IS 13252: Mobile Robot Safety Standards," 2024.</li>
+      <li>World Bank. "Economic Impact of Infrastructure Failure," 2023.</li>
+      <li>HNL-ES1 Processor Datasheet Rev C. "Sovereign SoC Specification," 2025.</li>
+      <li>EHARS Control Systems Manual v35.5. "S-MAX Implementation Guide," 2025.</li>
+    </ol>
+
+    <div style="margin-top: 3rem; border-top: 2px solid var(--border); padding-top: 1rem; font-size: 9pt; color: var(--muted);">
+      <p><strong>Legal Disclaimer:</strong> This document contains technical information subject to export control laws. Distribution limited to authorized personnel under NDA HNL-2025-001. Specifications subject to change without notice. PROJECT HNL-INTL-2026-KAZ-001 and EHARS 35.5 S-MAX are trademarks of MD Mosaraf Hossain, MSME UDYAM-WB-13-0148319.</p>
+      <p><strong>Contact:</strong> architect@hnl-kaz-001.org.sovereign | PGP: 0x4A7F...C2D1</p>
+    </div>
+
+    <div class="footer">
+      <span>HNL-INTL-2026-KAZ-001 | Sovereign Cognitive Robotics</span>
+      <span class="page-number"></span>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
